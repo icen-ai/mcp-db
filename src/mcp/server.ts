@@ -18,9 +18,9 @@ export interface ServeOptions {
 }
 
 export async function serveMcp(opts: ServeOptions = {}): Promise<void> {
-  const { config: dbmConfig } = loadConfig(opts.config);
+  const { config: dbmConfig, scripts } = loadConfig(opts.config);
   const authenticator = new Authenticator(dbmConfig.users);
-  const dbm = Dbm.fromConfig(dbmConfig);
+  const dbm = Dbm.fromConfig(dbmConfig, { scripts });
   const token = opts.token ?? process.env.DBM_TOKEN;
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
@@ -28,7 +28,7 @@ export async function serveMcp(opts: ServeOptions = {}): Promise<void> {
 
   process.stderr.write(`[mcp-db] ready · envs=${Object.keys(dbmConfig.connections).join(',')} · auth=${token ? 'token' : 'none'}\n`);
 
-  rl.on('line', (line) => {
+  rl.on('line', async (line) => {
     const text = line.trim();
     if (!text) return;
     let msg: any;
@@ -96,9 +96,66 @@ export async function serveMcp(opts: ServeOptions = {}): Promise<void> {
         break;
       }
 
-      case 'resources/list':
-        respond({ resources: [] });
+      case 'resources/list': {
+        // 元数据资源:dbm://{env}/{schema}/tables 与 dbm://{env}/{schema}/{table}
+        try {
+          const user = authenticator.resolve(token);
+          const resources: any[] = [];
+          for (const [env, conn] of Object.entries(dbmConfig.connections)) {
+            const canRead = (user.roles[env] ?? []).some((r) => dbm.permissions.opsForRole(env, r).has('read'));
+            if (!canRead) continue;
+            resources.push({
+              uri: `dbm://${env}/${conn.schema}/tables`,
+              name: `${env} · ${conn.schema} 表清单`,
+              description: `${conn.type} 连接 ${env} 的表目录(名称/类型/注释/估算行数/大小)`,
+              mimeType: 'application/json'
+            });
+          }
+          respond({ resources });
+        } catch (e) {
+          respondErr(-32603, `Internal error: ${e instanceof Error ? e.message : e}`);
+        }
         break;
+      }
+
+      case 'resources/templates/list': {
+        respond({
+          resourceTemplates: [
+            {
+              uriTemplate: 'dbm://{env}/{schema}/{table}',
+              name: '表列元数据',
+              description: '指定表的列定义:物理类型、可空、主键、默认值、注释、外键指向',
+              mimeType: 'application/json'
+            }
+          ]
+        });
+        break;
+      }
+
+      case 'resources/read': {
+        const uri = String(msg.params?.uri ?? '');
+        const m = uri.match(/^dbm:\/\/([A-Za-z_][A-Za-z0-9_]*)\/([A-Za-z_][A-Za-z0-9_]*)\/([A-Za-z_][A-Za-z0-9_]*)$/);
+        const tableOnly = uri.match(/^dbm:\/\/([A-Za-z_][A-Za-z0-9_]*)\/([A-Za-z_][A-Za-z0-9_]*)\/tables$/);
+        try {
+          const user = authenticator.resolve(token);
+          if (tableOnly) {
+            const [, env, schema] = tableOnly;
+            const tables = await dbm.listTables(user, env, schema);
+            respond({ contents: [{ uri, mimeType: 'application/json', text: JSON.stringify({ env, schema, tables }) }] });
+            break;
+          }
+          if (m && m[3] !== 'tables') {
+            const [, env, schema, table] = m;
+            const columns = await dbm.describeTable(user, env, table, schema);
+            respond({ contents: [{ uri, mimeType: 'application/json', text: JSON.stringify({ env, schema, table, columns }) }] });
+            break;
+          }
+          respondErr(-32602, `Invalid params: 无法识别的资源 URI:${uri}`);
+        } catch (e) {
+          respondErr(-32603, `Internal error: ${e instanceof Error ? e.message : e}`);
+        }
+        break;
+      }
 
       default:
         respondErr(-32601, `Method not found: ${msg.method}`);

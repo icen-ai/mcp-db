@@ -9,6 +9,10 @@ export interface TableMeta {
   /** information_schema.table_type: BASE TABLE / VIEW / FOREIGN */
   type: string;
   comment: string | null;
+  /** 估算行数(pg reltuples / mysql TABLE_ROWS);null = 未统计 */
+  estimatedRows: number | null;
+  /** 表总大小(数据+索引,字节);null = 未知 */
+  sizeBytes: number | null;
 }
 
 export interface ColumnMeta {
@@ -19,6 +23,8 @@ export interface ColumnMeta {
   isPk: boolean;
   defaultVal: string | null;
   comment: string | null;
+  /** 外键指向(供 Agent 推断 JOIN 关系);null = 非外键 */
+  references: { table: string; column: string } | null;
 }
 
 export interface QueryResult {
@@ -67,6 +73,7 @@ export interface BatchOpts {
 /**
  * Provider = 查询通道。Client(展示出口,如 DBX 桌面联动)是另一个维度,
  * 以 optional capability 表达,不进通道接口本体。
+ * 三种实现:DirectPgProvider / DirectMysqlProvider / McpProxyProvider。
  */
 export interface DatabaseProvider {
   readonly env: string;
@@ -78,4 +85,6 @@ export interface DatabaseProvider {
   executeBatch(sql: string, opts?: BatchOpts): Promise<BatchResult>;
   /** 可选能力:把 SQL 推到某个桌面客户端展示(如 DBX execute_and_show) */
   showInClient?(sql: string, role?: string): Promise<void>;
+  /** 可选:释放底层资源(连接池/子进程) */
+  close?(): Promise<void>;
 }

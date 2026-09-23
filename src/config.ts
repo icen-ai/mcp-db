@@ -4,33 +4,70 @@ import { DbmError } from './errors.js';
 import type { SqlOp } from './types.js';
 
 // ── 配置模型 ────────────────────────────────────────────────────────────────
-// 密码等敏感值支持 ${ENV_NAME} 插值,配置文件本身可安全提交(占位符形态)
+// 密码等敏感值支持 ${ENV_NAME} 插值,配置文件本身可安全提交(占位符形态)。
+// 连接三态:postgres(直连+GRANT 同步)/ mysql(直连,凭证由 DBA 预置)/
+//          mcp-proxy(桥接现成 MCP 数据源,如 dbhub/本项目的 mcp-db)
 
 export interface RoleCredential {
-  /** 池连接使用的数据库登录名 */
-  user: string;
-  password: string;
+  /** 池连接使用的数据库登录名(mcp-proxy 无凭证,可省略) */
+  user?: string;
+  password?: string;
   /** 连接池上限,默认 4 */
   max?: number;
   /** 语句超时毫秒,默认 30000 */
   statementTimeoutMs?: number;
 }
 
-export interface ConnectionConfig {
+interface ConnectionBase {
+  /** 业务默认 schema,如 typlm */
+  schema: string;
+  /** 生产类连接置 true:写/DDL 需要 confirmPhrase 口令 */
+  requireConfirmForWrite?: boolean;
+  /** 确认口令,默认「生产执行」 */
+  confirmPhrase?: string;
+  /** 爆炸半径护栏:预演影响行数超过该值时需 override 放行,默认 1000 */
+  maxAffectedRows?: number;
+  /** 角色池凭证(键即角色名,须与 grants 清单一致) */
+  roles: Record<string, RoleCredential>;
+}
+
+export interface PgConnectionConfig extends ConnectionBase {
   type: 'postgres';
   host: string;
   port: number;
   database: string;
-  /** 业务默认 schema,如 typlm */
-  schema: string;
-  /** 生产类连接置 true:写/DDL 需要确认口令 */
-  requireConfirmForWrite?: boolean;
-  /** 确认口令,默认「生产执行」 */
-  confirmPhrase?: string;
   ssl?: boolean;
-  /** 各角色池凭证(键即角色名,须与 grants 清单一致) */
-  roles: Record<string, RoleCredential>;
 }
+
+export interface MysqlConnectionConfig extends ConnectionBase {
+  type: 'mysql';
+  host: string;
+  port: number;
+  database: string;
+  ssl?: boolean;
+}
+
+/** 上游 MCP 工具映射:args 值里的 $sql / $maxRows 会被实际值替换 */
+export interface ProxyToolCall {
+  name: string;
+  args: Record<string, string>;
+}
+
+export interface McpProxyConnectionConfig extends ConnectionBase {
+  type: 'mcp-proxy';
+  /** 子进程命令,如 "bun" / "npx" / "dbx-mcp 路径" */
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  database: string;
+  /** 上游方言(postgres/mysql 时 list/describe 走 information_schema 探测) */
+  dialect?: 'postgres' | 'mysql';
+  /** 上游返回解析:json(结构化文本)| markdown(表格文本兜底) */
+  parseMode?: 'json' | 'markdown';
+  tools: { query: ProxyToolCall; batch?: ProxyToolCall };
+}
+
+export type ConnectionConfig = PgConnectionConfig | MysqlConnectionConfig | McpProxyConnectionConfig;
 
 export interface GrantRule {
   env: string;
@@ -50,10 +87,35 @@ export interface UserConfig {
   roles: Record<string, string[]>;
 }
 
+export interface ScriptParamDef {
+  name: string;
+  description?: string;
+  required?: boolean;
+  type?: 'string' | 'number' | 'boolean';
+}
+
+/** 受控脚本:预审过的 previewSql/executeSql 对,Agent 只传参数不碰 SQL 文本 */
+export interface ScriptDef {
+  id: string;
+  title: string;
+  description?: string;
+  /** 允许执行的环境 */
+  envs: string[];
+  params: ScriptParamDef[];
+  /** 预演/核验 SQL(:name 占位符) */
+  previewSql: string;
+  /** 缺省为只读脚本 */
+  executeSql?: string;
+}
+
 export interface DbmConfig {
   connections: Record<string, ConnectionConfig>;
   grants: GrantRule[];
   users: UserConfig[];
+  /** 脚本注册表(或用 scriptsFile 外置) */
+  scripts?: ScriptDef[];
+  /** 外置脚本文件路径(相对配置文件目录) */
+  scriptsFile?: string;
   audit?: { path?: string };
 }
 
@@ -86,6 +148,48 @@ function walkInterpolate(node: any): any {
   return node;
 }
 
+function validateConnection(env: string, conn: any, fail: (m: string) => never): ConnectionConfig {
+  if (!isIdent(env)) fail(`连接名 "${env}" 不是合法标识符`);
+  if (!conn || typeof conn !== 'object') fail(`${env}: 连接必须是对象`);
+  if (!isIdent(conn.schema)) fail(`${env}: schema 必须是合法标识符`);
+  if (!conn.roles || typeof conn.roles !== 'object' || Object.keys(conn.roles).length === 0) {
+    fail(`${env}: roles 不能为空`);
+  }
+  const needsCred = conn.type !== 'mcp-proxy';
+  for (const [role, cred] of Object.entries<RoleCredential>(conn.roles)) {
+    if (!isIdent(role)) fail(`${env}.roles."${role}" 不是合法标识符`);
+    if (!isIdent(cred?.user)) {
+      if (needsCred) fail(`${env}.roles.${role}.user 不是合法标识符`);
+    } else if (needsCred && (typeof cred.password !== 'string' || !cred.password)) {
+      fail(`${env}.roles.${role}.password 缺失`);
+    }
+  }
+
+  switch (conn.type) {
+    case 'postgres':
+    case 'mysql': {
+      if (!conn.host) fail(`${env}: 缺少 host`);
+      if (typeof conn.port !== 'number') fail(`${env}: 缺少 port`);
+      if (!conn.database) fail(`${env}: 缺少 database`);
+      return conn as PgConnectionConfig | MysqlConnectionConfig;
+    }
+    case 'mcp-proxy': {
+      if (!conn.command) fail(`${env}: mcp-proxy 缺少 command`);
+      if (!conn.database) fail(`${env}: mcp-proxy 缺少 database(展示用标识)`);
+      if (!conn.tools?.query?.name) fail(`${env}: mcp-proxy 缺少 tools.query.name`);
+      if (conn.tools?.query?.args && typeof conn.tools.query.args !== 'object') {
+        fail(`${env}: tools.query.args 必须是对象`);
+      }
+      if (conn.parseMode && !['json', 'markdown'].includes(conn.parseMode)) {
+        fail(`${env}: parseMode 只能是 json | markdown`);
+      }
+      return conn as McpProxyConnectionConfig;
+    }
+    default:
+      fail(`${env}: 未知连接 type "${conn.type}"(支持 postgres / mysql / mcp-proxy)`);
+  }
+}
+
 export function validateConfig(raw: any, source: string): DbmConfig {
   const fail = (msg: string): never => {
     throw new DbmError('CONFIG_INVALID', `配置文件 ${source} 无效:${msg}`);
@@ -97,19 +201,11 @@ export function validateConfig(raw: any, source: string): DbmConfig {
   if (!cfg.connections || typeof cfg.connections !== 'object' || Object.keys(cfg.connections).length === 0) {
     fail('connections 不能为空');
   }
-  for (const [env, conn] of Object.entries(cfg.connections)) {
-    if (!isIdent(env)) fail(`连接名 "${env}" 不是合法标识符`);
-    if (conn.type !== 'postgres') fail(`${env}: 当前仅支持 type=postgres`);
-    if (!conn.host) fail(`${env}: 缺少 host`);
-    if (typeof conn.port !== 'number') fail(`${env}: 缺少 port`);
-    if (!isIdent(conn.schema)) fail(`${env}: schema 必须是合法标识符`);
-    if (!conn.roles || Object.keys(conn.roles).length === 0) fail(`${env}: roles 不能为空`);
-    for (const [role, cred] of Object.entries(conn.roles)) {
-      if (!isIdent(role)) fail(`${env}.roles."${role}" 不是合法标识符`);
-      if (!isIdent(cred?.user)) fail(`${env}.roles.${role}.user 不是合法标识符`);
-      if (typeof cred?.password !== 'string' || !cred.password) fail(`${env}.roles.${role}.password 缺失`);
-    }
+  const connections: Record<string, ConnectionConfig> = {};
+  for (const [env, conn] of Object.entries<any>(cfg.connections)) {
+    connections[env] = validateConnection(env, conn, fail);
   }
+  cfg.connections = connections;
 
   if (!Array.isArray(cfg.grants)) fail('grants 必须是数组');
   for (const g of cfg.grants) {
@@ -148,12 +244,41 @@ export function validateConfig(raw: any, source: string): DbmConfig {
     }
   }
 
+  if (cfg.scripts) {
+    if (!Array.isArray(cfg.scripts)) fail('scripts 必须是数组(或用 scriptsFile 外置)');
+    for (const s of cfg.scripts) validateScript(s, cfg, fail);
+  }
+  if (cfg.scriptsFile && typeof cfg.scriptsFile !== 'string') fail('scriptsFile 必须是字符串路径');
+
   return cfg;
+}
+
+export function validateScript(s: any, cfg: DbmConfig, fail: (m: string) => never): ScriptDef {
+  if (!isIdent(s?.id)) fail(`scripts.id "${s?.id}" 不是合法标识符`);
+  if (!s?.title) fail(`脚本 ${s.id}: 缺少 title`);
+  if (!Array.isArray(s?.envs) || s.envs.length === 0) fail(`脚本 ${s.id}: envs 不能为空`);
+  for (const e of s.envs) {
+    if (!isIdent(e)) fail(`脚本 ${s.id}: 环境 "${e}" 不是合法标识符`);
+    if (!cfg.connections[e]) fail(`脚本 ${s.id}: 引用了不存在的连接 "${e}"`);
+  }
+  if (!s.previewSql || typeof s.previewSql !== 'string') fail(`脚本 ${s.id}: 缺少 previewSql`);
+  if (s.executeSql !== undefined && typeof s.executeSql !== 'string') fail(`脚本 ${s.id}: executeSql 必须是字符串`);
+  const seen = new Set<string>();
+  for (const p of s.params ?? []) {
+    if (!isIdent(p?.name)) fail(`脚本 ${s.id}: 参数名 "${p?.name}" 不是合法标识符`);
+    if (seen.has(p.name)) fail(`脚本 ${s.id}: 参数 ${p.name} 重复`);
+    seen.add(p.name);
+    if (p.type && !['string', 'number', 'boolean'].includes(p.type)) {
+      fail(`脚本 ${s.id}: 参数 ${p.name} 的 type 只能是 string/number/boolean`);
+    }
+  }
+  return s as ScriptDef;
 }
 
 export interface LoadedConfig {
   config: DbmConfig;
   path: string;
+  scripts: ScriptDef[];
 }
 
 export function resolveConfigPath(explicit?: string): string {
@@ -172,7 +297,29 @@ export function loadConfig(explicit?: string): LoadedConfig {
     );
   }
   const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-  return { config: validateConfig(walkInterpolate(raw), p), path: p };
+  const config = validateConfig(walkInterpolate(raw), p);
+
+  // 脚本注册表:scriptsFile 外置优先,否则用内联 scripts
+  let scripts: ScriptDef[] = config.scripts ?? [];
+  if (config.scriptsFile) {
+    const sp = path.resolve(path.dirname(p), config.scriptsFile);
+    if (!fs.existsSync(sp)) {
+      throw new DbmError('CONFIG_INVALID', `scriptsFile 指向的文件不存在:${sp}`);
+    }
+    const fail = (m: string): never => {
+      throw new DbmError('CONFIG_INVALID', `脚本文件 ${sp} 无效:${m}`);
+    };
+    const rawScripts = JSON.parse(fs.readFileSync(sp, 'utf8'));
+    if (!Array.isArray(rawScripts)) fail('根必须是脚本数组');
+    scripts = rawScripts.map((s: any) => validateScript(s, config, fail));
+  }
+
+  const ids = new Set<string>();
+  for (const s of scripts) {
+    if (ids.has(s.id)) throw new DbmError('CONFIG_INVALID', `脚本 id 重复:${s.id}`);
+    ids.add(s.id);
+  }
+  return { config, path: p, scripts };
 }
 
 /** 双引号安全引用标识符(配置层已做白名单,这里是第二道保险) */

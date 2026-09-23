@@ -81,13 +81,22 @@ describe('MCP server(stdio JSON-RPC)', () => {
     expect(pong).toEqual({});
   }, 10000);
 
-  test('tools/list 暴露流程化工具面', async () => {
+  test('tools/list 暴露流程化工具面(含脚本与审计)', async () => {
     const list = await proc.call('tools/list');
     const names = list.tools.map((t: any) => t.name);
     expect(names).toContain('dbm_query');
     expect(names).toContain('dbm_run');
     expect(names).toContain('dbm_preview');
+    expect(names).toContain('dbm_list_scripts');
+    expect(names).toContain('dbm_run_script');
+    expect(names).toContain('dbm_audit');
     expect(list.tools.find((t: any) => t.name === 'dbm_run').inputSchema.required).toEqual(['env', 'executeSql']);
+  }, 10000);
+
+  test('dbm_list_scripts 返回注册表(fixture 内置 2 个)', async () => {
+    const res = await proc.call('tools/call', { name: 'dbm_list_scripts', arguments: { env: 'dev' } });
+    expect(res.structuredContent.count).toBe(2);
+    expect(res.structuredContent.scripts.map((s: any) => s.id)).toContain('fix_region');
   }, 10000);
 
   test('dbm_whoami 返回身份与权限矩阵', async () => {
@@ -112,6 +121,22 @@ describe('MCP server(stdio JSON-RPC)', () => {
     expect(res.isError).toBe(true);
     expect(typeof res.structuredContent.error).toBe('string');
   }, 20000);
+
+  test('resources/list 只暴露有读权限的环境资源', async () => {
+    const res = await proc.call('resources/list');
+    const uris = res.resources.map((r: any) => r.uri);
+    expect(uris).toContain('dbm://dev/typlm/tables');
+    expect(uris).toContain('dbm://ga/typlm/tables');
+  }, 10000);
+
+  test('resources/templates/list 声明表元数据模板', async () => {
+    const res = await proc.call('resources/templates/list');
+    expect(res.resourceTemplates[0].uriTemplate).toBe('dbm://{env}/{schema}/{table}');
+  }, 10000);
+
+  test('resources/read 拒绝无法识别的 URI', async () => {
+    await expect(proc.call('resources/read', { uri: 'dbm://bogus' })).rejects.toThrow('Invalid params');
+  }, 10000);
 });
 
 describe('MCP server 认证(fail closed)', () => {

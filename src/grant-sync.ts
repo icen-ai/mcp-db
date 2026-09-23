@@ -125,11 +125,14 @@ export async function planGrants(
   opts: { rotatePasswords?: boolean } = {}
 ): Promise<GrantPlan> {
   const conn = config.connections[env];
+  if (conn.type !== 'postgres') {
+    throw new Error(`sync 仅支持 postgres 直连连接(环境 ${env} 是 ${conn.type})`);
+  }
   const warnings: string[] = [];
   const actions: SyncAction[] = [];
 
   // 1. 登录用户存在性
-  const managedLogins = [...new Set(Object.values(conn.roles).map((c) => c.user))];
+  const managedLogins = [...new Set(Object.values(conn.roles).map((c) => c.user!))];
   const existing = await admin.query<{ rolname: string }>(
     `SELECT rolname FROM pg_roles WHERE rolname = ANY($1::text[])`,
     [managedLogins]
@@ -140,13 +143,13 @@ export async function planGrants(
     if (!existingSet.has(login)) {
       actions.push({
         kind: 'CREATE_ROLE',
-        sql: `CREATE ROLE ${quoteIdent(login)} LOGIN PASSWORD ${escapePassword(cred.password)};`,
+        sql: `CREATE ROLE ${quoteIdent(login)} LOGIN PASSWORD ${escapePassword(cred.password!)};`,
         detail: `创建登录用户 ${login}`
       });
     } else if (opts.rotatePasswords) {
       actions.push({
         kind: 'ALTER_PASSWORD',
-        sql: `ALTER ROLE ${quoteIdent(login)} PASSWORD ${escapePassword(cred.password)};`,
+        sql: `ALTER ROLE ${quoteIdent(login)} PASSWORD ${escapePassword(cred.password!)};`,
         detail: `重设 ${login} 密码(rotatePasswords)`
       });
     }
@@ -162,7 +165,7 @@ export async function planGrants(
   }
 
   // 3. 表级授权 diff(admin 登录除外:同步主体不归清单管)
-  const adminLogin = conn.roles['admin']?.user;
+  const adminLogin = conn.roles['admin']?.user!;
   const tableManaged = managedLogins.filter((l) => l !== adminLogin);
 
   const tablesRes = await admin.query<{ table_name: string }>(
@@ -282,6 +285,9 @@ export async function applyGrants(admin: Client, plan: GrantPlan): Promise<{ app
 
 /** 同步用的 admin 连接(取连接配置中角色名为 admin 的凭证) */
 export function adminClient(conn: ConnectionConfig): Client {
+  if (conn.type !== 'postgres') {
+    throw new Error(`sync 仅支持 postgres 直连连接(当前:${conn.type});mysql 账号边界由 DBA 预置,mcp-proxy 由上游服务自治`);
+  }
   const adminCred = conn.roles['admin'];
   if (!adminCred) {
     throw new Error(`连接 ${conn.database}@${conn.host} 未配置 admin 角色凭证,无法执行同步`);

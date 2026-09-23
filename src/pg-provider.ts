@@ -1,5 +1,5 @@
 import { Pool, type PoolClient } from 'pg';
-import type { ConnectionConfig } from './config.js';
+import type { PgConnectionConfig } from './config.js';
 import type {
   BatchOpts,
   BatchResult,
@@ -26,7 +26,7 @@ export class DirectPgProvider implements DatabaseProvider {
 
   constructor(
     public readonly env: string,
-    private cfg: ConnectionConfig
+    private cfg: PgConnectionConfig
   ) {}
 
   /** 默认探测角色:配置里第一个(建议把 analyst 放最前,探测的是最小权限路径) */
@@ -83,11 +83,16 @@ export class DirectPgProvider implements DatabaseProvider {
       table_name: string;
       table_type: string;
       comment: string | null;
+      est_rows: number | null;
+      total_bytes: number | null;
     }>(
       `SELECT t.table_name,
               t.table_type,
-              obj_description(format('%I.%I', t.table_schema, t.table_name)::regclass, 'pg_class') AS comment
+              obj_description(format('%I.%I', t.table_schema, t.table_name)::regclass, 'pg_class') AS comment,
+              c.reltuples::bigint AS est_rows,
+              CASE WHEN c.oid IS NULL THEN NULL ELSE pg_total_relation_size(c.oid) END AS total_bytes
        FROM information_schema.tables t
+       LEFT JOIN pg_class c ON c.oid = format('%I.%I', t.table_schema, t.table_name)::regclass
        WHERE t.table_schema = $1 AND t.table_type IN ('BASE TABLE', 'VIEW', 'FOREIGN')
        ORDER BY t.table_name`,
       [schema]
@@ -96,7 +101,9 @@ export class DirectPgProvider implements DatabaseProvider {
       schema,
       name: r.table_name,
       type: r.table_type,
-      comment: r.comment ?? null
+      comment: r.comment ?? null,
+      estimatedRows: r.est_rows !== null && r.est_rows >= 0 ? Number(r.est_rows) : null,
+      sizeBytes: r.total_bytes !== null ? Number(r.total_bytes) : null
     }));
   }
 
@@ -116,7 +123,7 @@ export class DirectPgProvider implements DatabaseProvider {
       `SELECT c.column_name, c.data_type, c.udt_name,
               c.character_maximum_length, c.numeric_precision, c.numeric_scale,
               c.is_nullable, c.column_default,
-              pg_catalog.col_description(format('%I.%I', $1, $2)::regclass, c.ordinal_position) AS comment
+              pg_catalog.col_description(format('%I.%I', $1::text, $2::text)::regclass, c.ordinal_position) AS comment
        FROM information_schema.columns c
        WHERE c.table_schema = $1 AND c.table_name = $2
        ORDER BY c.ordinal_position`,
@@ -132,13 +139,30 @@ export class DirectPgProvider implements DatabaseProvider {
     );
     const pkSet = new Set(pk.rows.map((r) => r.column_name));
 
+    // 外键:Agent 推断 JOIN 关系的上下文。
+    // 走 pg_catalog 而非 information_schema——后者的视图与参数下推组合会触发 42P08
+    const fk = await pool.query<{ column_name: string; foreign_table: string; foreign_column: string }>(
+      `SELECT a.attname AS column_name, cf.relname AS foreign_table, af.attname AS foreign_column
+       FROM pg_constraint con
+       JOIN pg_class ct ON ct.oid = con.conrelid
+       JOIN pg_namespace nt ON nt.oid = ct.relnamespace
+       JOIN pg_class cf ON cf.oid = con.confrelid
+       CROSS JOIN LATERAL generate_subscripts(con.conkey, 1) AS i
+       JOIN pg_attribute a ON a.attrelid = ct.oid AND a.attnum = con.conkey[i]
+       JOIN pg_attribute af ON af.attrelid = cf.oid AND af.attnum = con.confkey[i]
+       WHERE con.contype = 'f' AND nt.nspname = $1 AND ct.relname = $2`,
+      [schema, table]
+    );
+    const fkMap = new Map(fk.rows.map((r) => [r.column_name, { table: r.foreign_table, column: r.foreign_column }]));
+
     return cols.rows.map((r) => ({
       name: r.column_name,
       rawType: formatRawType(r),
       nullable: r.is_nullable === 'YES',
       isPk: pkSet.has(r.column_name),
       defaultVal: r.column_default ?? null,
-      comment: r.comment ?? null
+      comment: r.comment ?? null,
+      references: fkMap.get(r.column_name) ?? null
     }));
   }
 

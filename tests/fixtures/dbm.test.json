@@ -6,6 +6,7 @@
       "port": 55432,
       "database": "typlm",
       "schema": "typlm",
+      "maxAffectedRows": 1,
       "roles": {
         "analyst": { "user": "plm_analyst", "password": "analyst_pw" },
         "ops": { "user": "plm_ops", "password": "ops_pw" },
@@ -49,6 +50,27 @@
       "name": "管理员",
       "tokens": ["test-token-admin-0000001"],
       "roles": { "dev": ["ops", "analyst"], "ga": ["admin"] }
+    }
+  ],
+  "scripts": [
+    {
+      "id": "fix_region",
+      "title": "按编号修正区域",
+      "description": "把指定项目编号的区域改为新值(参数以字面量进入 SQL)",
+      "envs": ["dev"],
+      "params": [
+        { "name": "code", "type": "string" },
+        { "name": "region", "type": "string" }
+      ],
+      "previewSql": "SELECT id, project_code, region FROM typlm.ty_project WHERE project_code = :code",
+      "executeSql": "UPDATE typlm.ty_project SET region = :region WHERE project_code = :code"
+    },
+    {
+      "id": "count_by_region",
+      "title": "按区域统计项目数",
+      "envs": ["dev"],
+      "params": [{ "name": "region", "type": "string", "required": false }],
+      "previewSql": "SELECT region, COUNT(*) AS c FROM typlm.ty_project WHERE (:region IS NULL OR region = :region) GROUP BY region"
     }
   ],
   "audit": { "path": "./data/test-audit.jsonl" }

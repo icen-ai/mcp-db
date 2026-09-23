@@ -32,6 +32,7 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
+    "mysql2": "^3.24.4",
     "pg": "^8.13.0"
   },
   "devDependencies": {

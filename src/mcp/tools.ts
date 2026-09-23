@@ -125,14 +125,15 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'dbm_run',
     description:
-      '执行写操作,走完整流程:预演 → 生产确认(需要时)→ 执行 → 执行后核验。requireConfirmForWrite 的环境(生产)首次调用不带 confirm 会返回 needConfirm 与预演结果;用户确认后携带 confirm 口令(默认「生产执行」)再次调用才会真正执行。',
+      '执行写操作,走完整流程:预演 → 生产确认(需要时)→ 爆炸半径护栏(需要时)→ 执行 → 执行后核验。两类二次确认:1) requireConfirmForWrite 的环境(生产)需携带 confirm 口令(默认「生产执行」);2) 预演影响行数超过连接的 maxAffectedRows(默认 1000)时返回 needOverride,用户确认影响范围后携带 override=true 再次调用才会真正执行。',
     inputSchema: {
       type: 'object',
       properties: {
         env: { type: 'string' },
-        previewSql: { type: 'string', description: '预演/核验用的只读 SQL(强烈建议提供)' },
+        previewSql: { type: 'string', description: '预演/核验用的只读 SQL(强烈建议提供,也是护栏的度量依据)' },
         executeSql: { type: 'string', description: '要执行的写/DDL SQL' },
-        confirm: { type: 'string', description: '生产确认口令(仅生产环境需要)' }
+        confirm: { type: 'string', description: '生产确认口令(仅生产环境需要)' },
+        override: { type: 'boolean', description: '爆炸半径放行:确认预演影响行数超限是有意为之' }
       },
       required: ['env', 'executeSql'],
       additionalProperties: false
@@ -141,8 +142,76 @@ export const TOOLS: ToolDef[] = [
       return ctx.dbm.run(ctx.user, str(args.env, 'env'), {
         previewSql: typeof args.previewSql === 'string' && args.previewSql ? args.previewSql : undefined,
         executeSql: str(args.executeSql, 'executeSql'),
-        confirm: typeof args.confirm === 'string' ? args.confirm : undefined
+        confirm: typeof args.confirm === 'string' ? args.confirm : undefined,
+        override: args.override === true
       });
+    }
+  },
+  {
+    name: 'dbm_list_scripts',
+    description:
+      '列出脚本注册表中的受控操作(预审过的预演/执行 SQL 对)。生产高频操作应优先走脚本:Agent 只传参数,不接触 SQL 文本。',
+    inputSchema: {
+      type: 'object',
+      properties: { env: { type: 'string', description: '按环境过滤;省略列出全部可见脚本' } },
+      additionalProperties: false
+    },
+    async handler(ctx, args) {
+      const scripts = ctx.dbm.listScripts(ctx.user, typeof args?.env === 'string' && args.env ? args.env : undefined);
+      return { count: scripts.length, scripts };
+    }
+  },
+  {
+    name: 'dbm_run_script',
+    description:
+      '执行注册脚本:渲染参数 → 预演 → 确认(生产/超行数,同 dbm_run 语义)→ 执行 → 核验。参数以字面量形式进入 SQL,值中的任何内容都不会被当作 SQL 执行。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        env: { type: 'string' },
+        scriptId: { type: 'string' },
+        params: { type: 'object', description: '脚本参数(键值对,按脚本声明的参数名校验)' },
+        confirm: { type: 'string', description: '生产确认口令(仅生产环境需要)' },
+        override: { type: 'boolean', description: '爆炸半径放行' }
+      },
+      required: ['env', 'scriptId'],
+      additionalProperties: false
+    },
+    async handler(ctx, args) {
+      return ctx.dbm.runScript(
+        ctx.user,
+        str(args.env, 'env'),
+        str(args.scriptId, 'scriptId'),
+        (args.params && typeof args.params === 'object' ? args.params : {}),
+        typeof args.confirm === 'string' ? args.confirm : undefined,
+        args.override === true
+      );
+    }
+  },
+  {
+    name: 'dbm_audit',
+    description:
+      '审计回查:默认查自己的操作留痕(含被拒绝的);持有 ddl 级角色的用户可传 userId 查他人。支持按环境/动作/结果过滤,返回最近记录(倒序)。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', description: '查他人需 ddl 级角色,否则被拒' },
+        env: { type: 'string' },
+        action: { type: 'string', description: 'query / preview / run / run_script / …' },
+        ok: { type: 'boolean', description: '按成功/失败过滤' },
+        limit: { type: 'number', description: '默认 50' }
+      },
+      additionalProperties: false
+    },
+    async handler(ctx, args) {
+      const entries = await ctx.dbm.auditQuery(ctx.user, {
+        userId: typeof args.userId === 'string' && args.userId ? args.userId : undefined,
+        env: typeof args.env === 'string' && args.env ? args.env : undefined,
+        action: typeof args.action === 'string' && args.action ? args.action : undefined,
+        ok: typeof args.ok === 'boolean' ? args.ok : undefined,
+        limit: typeof args.limit === 'number' ? args.limit : 50
+      });
+      return { count: entries.length, entries };
     }
   }
 ];

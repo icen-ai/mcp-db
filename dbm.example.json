@@ -25,6 +25,17 @@
         "analyst": { "user": "plm_analyst", "password": "${GA_ANALYST_PASSWORD}", "max": 2 },
         "admin": { "user": "plm_admin", "password": "${GA_ADMIN_PASSWORD}", "max": 2 }
       }
+    },
+    "hub": {
+      "type": "mcp-proxy",
+      "command": "npx",
+      "args": ["-y", "@bytebase/dbhub", "--dsn", "${PROXY_DSN}"],
+      "database": "dbhub-upstream",
+      "schema": "public",
+      "dialect": "postgres",
+      "parseMode": "json",
+      "tools": { "query": { "name": "execute_sql", "args": { "sql": "$sql" } } },
+      "roles": { "default": {} }
     }
   },
   "grants": [
@@ -39,7 +50,7 @@
       "id": "u_zhang",
       "name": "数据运营",
       "tokens": ["${TOKEN_ZHANG}"],
-      "roles": { "dev": ["analyst", "ops"], "ga": ["analyst"] }
+      "roles": { "dev": ["analyst", "ops"], "ga": ["analyst"], "hub": ["default"] }
     },
     {
       "id": "u_admin",
@@ -48,5 +59,20 @@
       "roles": { "dev": ["ops", "analyst", "admin"], "ga": ["admin"] }
     }
   ],
+  "scripts": [
+    {
+      "id": "fix_project_region",
+      "title": "按编号修正项目区域",
+      "description": "预审过的受控操作:参数以字面量进入 SQL,Agent 只传参数",
+      "envs": ["dev"],
+      "params": [
+        { "name": "code", "type": "string", "description": "项目编号,如 P7-260001" },
+        { "name": "region", "type": "string", "description": "新区域,如 华东" }
+      ],
+      "previewSql": "SELECT id, project_code, region FROM typlm.ty_project WHERE project_code = :code",
+      "executeSql": "UPDATE typlm.ty_project SET region = :region WHERE project_code = :code"
+    }
+  ],
   "audit": { "path": "./data/audit.jsonl" }
 }
+

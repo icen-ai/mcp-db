@@ -62,3 +62,40 @@ describe('validateConfig', () => {
     expect(() => validateConfig(bad2, 'test')).toThrow(DbmError);
   });
 });
+
+describe('validateConfig · 连接三态', () => {
+  test('mysql 连接通过', () => {
+    const cfg = valid();
+    (cfg.connections as any).mydb = {
+      type: 'mysql', host: 'h', port: 3306, database: 'd', schema: 's',
+      roles: { analyst: { user: 'u1', password: 'p' } }
+    };
+    expect(() => validateConfig(cfg, 'test')).not.toThrow();
+  });
+
+  test('mcp-proxy 连接:缺 tools.query 被拒;完整配置通过(无凭证合法)', () => {
+    const bad = valid();
+    (bad.connections as any).hub = { type: 'mcp-proxy', command: 'bun', database: 'x', schema: 's', roles: { default: {} } };
+    expect(() => validateConfig(bad, 'test')).toThrow(DbmError);
+
+    const good = valid();
+    (good.connections as any).hub = {
+      type: 'mcp-proxy', command: 'bun', database: 'x', schema: 's',
+      tools: { query: { name: 'q', args: { sql: '$sql' } } },
+      roles: { default: {} }
+    };
+    expect(() => validateConfig(good, 'test')).not.toThrow();
+  });
+
+  test('未知连接 type 被拒', () => {
+    const bad = valid();
+    (bad.connections as any).weird = { type: 'oracle', host: 'h', port: 1, database: 'd', schema: 's', roles: { a: { user: 'u', password: 'p' } } };
+    expect(() => validateConfig(bad, 'test')).toThrow(DbmError);
+  });
+
+  test('脚本校验:引用不存在的环境被拒', () => {
+    const bad = valid();
+    (bad as any).scripts = [{ id: 's1', title: 't', envs: ['nosuch'], params: [], previewSql: 'SELECT 1' }];
+    expect(() => validateConfig(bad, 'test')).toThrow(DbmError);
+  });
+});

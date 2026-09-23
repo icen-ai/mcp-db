@@ -4,6 +4,12 @@
 //   sync [--env x]   把权限清单物化为数据库 GRANT/REVOKE(幂等 diff)
 //   check [--env x]  健康探测 + 权限矩阵
 import { serveMcp } from './mcp/server.js';
+import type { ConnectionConfig } from './config.js';
+
+function endpointOf(conn: ConnectionConfig): string {
+  if (conn.type === 'mcp-proxy') return `${conn.command} ${(conn.args ?? []).join(' ')}`.trim();
+  return `${conn.host}:${conn.port}/${conn.database}`;
+}
 import { loadConfig } from './config.js';
 import { adminClient, applyGrants, planGrants } from './grant-sync.js';
 import { Dbm } from './orchestrator.js';
@@ -61,7 +67,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { config } = loadConfig(configPath);
+  const { config, scripts } = loadConfig(configPath);
 
   if (command === 'sync') {
     const envFlag = flags.get('env');
@@ -75,7 +81,7 @@ async function main(): Promise<void> {
       await admin.connect();
       try {
         const plan = await planGrants(admin, config, env, { rotatePasswords: rotate });
-        console.log(`\n== ${env}(${conn.host}:${conn.port}/${conn.database}, schema ${conn.schema})==`);
+        console.log(`\n== ${env}(${endpointOf(conn)}, schema ${conn.schema})==`);
         for (const w of plan.warnings) console.log(`  ⚠ ${w}`);
         if (plan.actions.length === 0) {
           console.log('  权限已同步,无需变更。');
@@ -102,11 +108,11 @@ async function main(): Promise<void> {
     const envs = typeof envFlag === 'string' && envFlag ? [envFlag] : Object.keys(config.connections);
     let allOk = true;
 
-    const dbm = Dbm.fromConfig(config);
+    const dbm = Dbm.fromConfig(config, { scripts });
     const adminUser = config.users[0];
     for (const env of envs) {
       const conn = config.connections[env];
-      console.log(`\n== ${env}(${conn.host}:${conn.port}/${conn.database})==`);
+      console.log(`\n== ${env}(${endpointOf(conn)})==`);
       const health = await dbm.health(adminUser, env);
       for (const [key, h] of Object.entries(health)) {
         const mark = h.ok ? '✓' : '✗';

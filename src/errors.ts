@@ -6,7 +6,12 @@ export type DbmErrorCode =
   | 'DENIED_ENV'
   | 'DENIED_OP'
   | 'DENIED_NOT_READ'
+  | 'DENIED_AUDIT_SCOPE'
   | 'NEED_CONFIRM'
+  | 'SCRIPT_NOT_FOUND'
+  | 'SCRIPT_INVALID_PARAMS'
+  | 'SCRIPT_INVALID_TEMPLATE'
+  | 'SCRIPT_ENV_NOT_ALLOWED'
   | 'PROVIDER_ERROR';
 
 export class DbmError extends Error {
