@@ -1,6 +1,6 @@
 {
   "name": "mcp-db",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "数据库中间层 MCP server:直连 Provider(角色×连接池)+ 权限清单物化为原生 GRANT + 预演/确认/护栏/执行/核验/留痕。对内亦可作 npm 库使用(内部曾用名 @icen.ai/dbm)。",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,7 +30,6 @@
     "node": ">=18"
   },
   "license": "UNLICENSED",
-  "private": true,
   "dependencies": {
     "mysql2": "^3.24.4",
     "pg": "^8.13.0"
@@ -39,5 +38,23 @@
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/icen-ai/mcp-db.git"
+  },
+  "bugs": {
+    "url": "https://github.com/icen-ai/mcp-db/issues"
+  },
+  "homepage": "https://github.com/icen-ai/mcp-db#readme",
+  "keywords": [
+    "mcp",
+    "database",
+    "postgresql",
+    "mysql",
+    "mcp-server",
+    "grant",
+    "sql",
+    "guardrail"
+  ]
 }
