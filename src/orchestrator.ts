@@ -82,9 +82,13 @@ export class Dbm {
     }
   }
 
-  /** 从配置构建(库用法的主入口) */
+  /** 从配置构建(库用法的主入口);审计路径优先级:显式 opts > config.audit.path > 默认 */
   public static fromConfig(config: DbmConfig, opts: { auditPath?: string; scripts?: ScriptDef[] } = {}): Dbm {
-    return new Dbm(config, new AuditLog(opts.auditPath ?? defaultAuditPath()), opts.scripts ?? config.scripts ?? []);
+    return new Dbm(
+      config,
+      new AuditLog(opts.auditPath ?? config.audit?.path ?? defaultAuditPath()),
+      opts.scripts ?? config.scripts ?? []
+    );
   }
 
   public provider(env: string): DatabaseProvider {
