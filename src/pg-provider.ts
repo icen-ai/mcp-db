@@ -50,6 +50,8 @@ export class DirectPgProvider implements DatabaseProvider {
         max: cred.max ?? 4,
         statement_timeout: cred.statementTimeoutMs ?? 30_000,
         connectionTimeoutMillis: 8000,
+        // 业务 SQL 惯用不带 schema 前缀的表名:对齐 DBX 行为,把业务 schema 放进 search_path
+        options: `-c search_path=${this.cfg.schema},public`,
         ssl: this.cfg.ssl ? { rejectUnauthorized: false } : undefined
       });
       pool.on('error', (e) => console.error(`[dbm:${this.env}] pool error:`, e.message));
