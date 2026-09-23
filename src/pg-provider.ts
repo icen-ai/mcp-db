@@ -129,15 +129,17 @@ export class DirectPgProvider implements DatabaseProvider {
        ORDER BY c.ordinal_position`,
       [schema, table]
     );
-    const pk = await pool.query<{ column_name: string }>(
-      `SELECT kcu.column_name
-       FROM information_schema.table_constraints tc
-       JOIN information_schema.key_column_usage kcu
-         ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
-       WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = $1 AND tc.table_name = $2`,
+    // 主键走 pg_catalog:information_schema.table_constraints 对非 owner 角色隐藏约束
+    const pk = await pool.query<{ attname: string }>(
+      `SELECT a.attname
+       FROM pg_index i
+       JOIN pg_class t ON t.oid = i.indrelid
+       JOIN pg_namespace n ON n.oid = t.relnamespace
+       JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey)
+       WHERE i.indisprimary AND n.nspname = $1 AND t.relname = $2`,
       [schema, table]
     );
-    const pkSet = new Set(pk.rows.map((r) => r.column_name));
+    const pkSet = new Set(pk.rows.map((r) => r.attname));
 
     // 外键:Agent 推断 JOIN 关系的上下文。
     // 走 pg_catalog 而非 information_schema——后者的视图与参数下推组合会触发 42P08

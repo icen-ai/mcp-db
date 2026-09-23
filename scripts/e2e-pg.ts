@@ -168,6 +168,11 @@ async function main() {
   check('列元数据含外键指向', fkCol?.references?.table === 'ty_project' && fkCol.references.column === 'id',
     `project_id → ${fkCol?.references?.table}.${fkCol?.references?.column}`);
 
+  // 用 analyst(非 owner)验证主键可见性:information_schema 会隐藏,pg_catalog 不会
+  const projColsAnalyst = await dbm.describeTable(analyst, 'dev', 'ty_project');
+  const idCol = projColsAnalyst.find((c) => c.name === 'id');
+  check('非 owner 角色也能拿到主键标记', idCol?.isPk === true, `id.isPk=${idCol?.isPk}`);
+
   // ── 越权路径(墙在数据库)──
   console.log('\n== 越权路径(墙在数据库)==');
   try {
