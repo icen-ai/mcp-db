@@ -88,3 +88,33 @@ describe('diffAcl', () => {
     for (const a of actions) expect(a.sql).toMatch(/^GRANT [A-Z, ]+ ON TABLE "typlm"\."[ab]" TO "plm_(analyst|ops)";$/);
   });
 });
+
+describe('buildTargetAcl · 表模式通配', () => {
+  const cfgOf = (tables: any) => ({
+    ...config,
+    grants: [{ env: 'dev', role: 'ops', schema: 'typlm', tables, ops: ['read', 'write'] }]
+  });
+  const ALL = ['ty_project', 'ty_secret', 'act_hi_actinst', 'dim_customer'];
+
+  test('前缀模式 ty_* 只匹配 ty_ 开头的表', () => {
+    const target = buildTargetAcl(cfgOf(['ty_*']), 'dev', ALL);
+    const tables = [...target.keys()].map((k) => k.split('|')[1]).sort();
+    expect(tables).toEqual(['ty_project', 'ty_secret']);
+  });
+
+  test('后缀模式 *_actinst', () => {
+    const target = buildTargetAcl(cfgOf(['*_actinst']), 'dev', ALL);
+    expect([...target.keys()].map((k) => k.split('|')[1])).toEqual(['act_hi_actinst']);
+  });
+
+  test('混排:精确名 + 模式,去重合并', () => {
+    const target = buildTargetAcl(cfgOf(['dim_customer', 'ty_*']), 'dev', ALL);
+    const tables = [...target.keys()].map((k) => k.split('|')[1]).sort();
+    expect(tables).toEqual(['dim_customer', 'ty_project', 'ty_secret']);
+  });
+
+  test('模式零匹配 → 空授权(告警由 planGrants 产生)', () => {
+    const target = buildTargetAcl(cfgOf(['zzz_*']), 'dev', ALL);
+    expect(target.size).toBe(0);
+  });
+});

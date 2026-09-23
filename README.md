@@ -100,7 +100,7 @@ DBM_TOKEN=<用户 token> bun src/cli.ts serve
 
 - `connections.<env>`:三态联合;`maxAffectedRows` 爆炸半径阈值;`requireConfirmForWrite` + `confirmPhrase` 生产确认。
 - `roles`:角色 → 登录凭证,即连接池定义;`admin` 角色供 `sync` 使用(mcp-proxy 用单角色 `default`,无凭证)。
-- `grants[]`:权限清单。`ops`: `read` → `GRANT SELECT`;`write` → +`INSERT/UPDATE/DELETE`;`ddl` 不做表级物化。`tables: "*"` 通配。
+- `grants[]`:权限清单。`ops`: `read` → `GRANT SELECT`;`write` → +`INSERT/UPDATE/DELETE`;`ddl` 不做表级物化。`tables: "*"` 全部表;数组元素支持 * 通配模式(如 ty_*、*_tmp,同步时按 schema 实际表集展开)。
 - `users[]`:token → 用户 → 各环境角色。token 建议走 `${ENV}` 注入。
 - `scripts[]`(或 `scriptsFile` 外置):脚本注册表。
 - 所有标识符(连接名/角色/用户/schema/表)有白名单校验,从源头堵死配置注入。

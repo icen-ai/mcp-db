@@ -127,6 +127,19 @@ function isIdent(s: unknown): s is string {
   return typeof s === 'string' && IDENT_RE.test(s);
 }
 
+/** 表模式:标识符字符 + 任意位置 '*' 通配(如 ty_* / *_tmp / a*b);单独 '*' 由 tables 字符串形态表达 */
+const TABLE_PATTERN_RE = /^[A-Za-z0-9_*]+$/;
+
+export function isTablePattern(s: unknown): s is string {
+  return typeof s === 'string' && TABLE_PATTERN_RE.test(s) && s.length > 0;
+}
+
+/** 模式 → 匹配正则('*' → 任意字符序列,其余按字面) */
+export function tablePatternToRegex(pattern: string): RegExp {
+  const escaped = pattern.split('*').map((seg) => seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+  return new RegExp('^' + escaped + '$');
+}
+
 function interpolate(value: string): string {
   return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => {
     const v = process.env[name];
@@ -212,8 +225,8 @@ export function validateConfig(raw: any, source: string): DbmConfig {
     if (!cfg.connections[g.env]) fail(`grants 引用了不存在的连接 "${g.env}"`);
     if (!isIdent(g.role)) fail(`grants.role "${g.role}" 不是合法标识符`);
     if (!isIdent(g.schema)) fail(`grants.schema "${g.schema}" 不是合法标识符`);
-    if (g.tables !== '*' && !(Array.isArray(g.tables) && g.tables.every(isIdent))) {
-      fail(`grants(${g.env}/${g.role}) 的 tables 只能是 "*" 或标识符数组`);
+    if (g.tables !== '*' && !(Array.isArray(g.tables) && g.tables.every(isTablePattern))) {
+      fail(`grants(${g.env}/${g.role}) 的 tables 只能是 "*" 或表模式数组(模式支持 * 通配,如 ty_* / *_tmp)`);
     }
     const validOps: SqlOp[] = ['read', 'write', 'ddl'];
     if (!Array.isArray(g.ops) || !g.ops.every((o) => validOps.includes(o))) {

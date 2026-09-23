@@ -14,6 +14,8 @@ export {
   validateConfig,
   validateScript,
   quoteIdent,
+  isTablePattern,
+  tablePatternToRegex,
   type DbmConfig,
   type ConnectionConfig,
   type PgConnectionConfig,

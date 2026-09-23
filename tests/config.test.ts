@@ -99,3 +99,22 @@ describe('validateConfig · 连接三态', () => {
     expect(() => validateConfig(bad, 'test')).toThrow(DbmError);
   });
 });
+
+describe('validateConfig · 表模式', () => {
+  test('ty_* / *_xxx / 混排通过', () => {
+    const cfg = valid();
+    cfg.grants[0].tables = ['ty_*'];
+    expect(() => validateConfig(cfg, 'test')).not.toThrow();
+    cfg.grants[0].tables = ['*_tmp', 'ty_project'];
+    expect(() => validateConfig(cfg, 'test')).not.toThrow();
+  });
+
+  test('非法字符仍被拒(防配置注入)', () => {
+    const bad = valid();
+    bad.grants[0].tables = ['ty_*; DROP TABLE x'];
+    expect(() => validateConfig(bad, 'test')).toThrow(DbmError);
+    const bad2 = valid();
+    bad2.grants[0].tables = ['ty-xxx'];
+    expect(() => validateConfig(bad2, 'test')).toThrow(DbmError);
+  });
+});

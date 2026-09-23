@@ -1,6 +1,6 @@
 import { Client } from 'pg';
 import type { ConnectionConfig, DbmConfig } from './config.js';
-import { quoteIdent } from './config.js';
+import { quoteIdent, tablePatternToRegex } from './config.js';
 import type { SqlOp } from './types.js';
 
 // ── GRANT 同步器:把权限清单物化为数据库原生授权 ──────────────────────────────
@@ -54,7 +54,20 @@ export function buildTargetAcl(config: DbmConfig, env: string, allTables: string
     if (g.env !== env) continue;
     const login = conn.roles[g.role]?.user ?? g.role;
     if (skipLogins.has(login)) continue;
-    const tables = g.tables === '*' ? allTables : g.tables.filter((t) => tableSet.has(t));
+    const tables =
+      g.tables === '*'
+        ? allTables
+        : [
+            ...new Set(
+              g.tables.flatMap((t) =>
+                t.includes('*')
+                  ? allTables.filter((x) => tablePatternToRegex(t).test(x))
+                  : tableSet.has(t)
+                    ? [t]
+                    : []
+              )
+            )
+          ];
     const privs = new Set<TablePrivilege>();
     for (const op of g.ops) {
       if (op === 'meta') continue;
@@ -256,7 +269,13 @@ export async function planGrants(
   for (const g of config.grants) {
     if (g.env !== env || g.tables === '*') continue;
     for (const t of g.tables) {
-      if (!allTables.includes(t)) warnings.push(`清单引用的表 ${conn.schema}.${t} 不存在(已跳过)`);
+      if (t.includes('*')) {
+        if (!allTables.some((x) => tablePatternToRegex(t).test(x))) {
+          warnings.push(`表模式 ${t} 在 ${conn.schema} 未匹配到任何表`);
+        }
+      } else if (!allTables.includes(t)) {
+        warnings.push(`清单引用的表 ${conn.schema}.${t} 不存在(已跳过)`);
+      }
     }
   }
   for (const g of config.grants) {
