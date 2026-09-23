@@ -162,12 +162,20 @@ export class Dbm {
     const check = this.permissions.check(user, env, 'read');
     if (!check.allowed) await this.deny(user, env, 'preview', check.code!, check.reason!, sql);
     const role = this.permissions.pickRole(user, env, 'read')!;
-    const res = await this.measure(env, sql, role);
-    await this.audited({
-      ts: new Date().toISOString(), userId: user.id, env, action: 'preview', ok: true, role,
-      sql, affected: res.affectedCount
-    });
-    return { affectedCount: res.affectedCount, sampleColumns: res.sampleColumns, sampleRows: res.sampleRows };
+    try {
+      const res = await this.measure(env, sql, role);
+      await this.audited({
+        ts: new Date().toISOString(), userId: user.id, env, action: 'preview', ok: true, role,
+        sql, affected: res.affectedCount
+      });
+      return { affectedCount: res.affectedCount, sampleColumns: res.sampleColumns, sampleRows: res.sampleRows };
+    } catch (e: any) {
+      await this.audited({
+        ts: new Date().toISOString(), userId: user.id, env, action: 'preview', ok: false, role,
+        sql, detail: e.message
+      });
+      throw e;
+    }
   }
 
   private async measure(env: string, sql: string, role: string) {
