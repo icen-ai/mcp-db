@@ -118,3 +118,21 @@ describe('buildTargetAcl · 表模式通配', () => {
     expect(target.size).toBe(0);
   });
 });
+
+describe('buildTargetAcl · 中间与多重通配', () => {
+  const cfgOf = (tables: any) => ({
+    ...config,
+    grants: [{ env: 'dev', role: 'ops', schema: 'typlm', tables, ops: ['read'] }]
+  });
+  const ALL = ['a_x_b', 'a_sales_y_b', 'a_x_b_c', 'aZzb', 'ty_project'];
+
+  test('中间模式 a_*_b:匹配首尾、不匹配中缀错位', () => {
+    const target = buildTargetAcl(cfgOf(['a_*_b']), 'dev', ALL);
+    expect([...target.keys()].map((k) => k.split('|')[1]).sort()).toEqual(['a_sales_y_b', 'a_x_b']);
+  });
+
+  test('多重通配 a_*b*:需 a_ 前缀且含 b(aZzb 无下划线不匹配)', () => {
+    const target = buildTargetAcl(cfgOf(['a_*b*']), 'dev', ALL);
+    expect([...target.keys()].map((k) => k.split('|')[1]).sort()).toEqual(['a_sales_y_b', 'a_x_b', 'a_x_b_c']);
+  });
+});
