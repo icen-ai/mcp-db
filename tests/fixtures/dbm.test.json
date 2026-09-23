@@ -1,0 +1,55 @@
+{
+  "connections": {
+    "dev": {
+      "type": "postgres",
+      "host": "127.0.0.1",
+      "port": 55432,
+      "database": "typlm",
+      "schema": "typlm",
+      "roles": {
+        "analyst": { "user": "plm_analyst", "password": "analyst_pw" },
+        "ops": { "user": "plm_ops", "password": "ops_pw" },
+        "admin": { "user": "dbm_admin", "password": "admin_pw" }
+      }
+    },
+    "ga": {
+      "type": "postgres",
+      "host": "127.0.0.1",
+      "port": 55432,
+      "database": "typlm",
+      "schema": "typlm",
+      "requireConfirmForWrite": true,
+      "roles": {
+        "analyst": { "user": "plm_analyst", "password": "analyst_pw" },
+        "admin": { "user": "dbm_admin", "password": "admin_pw" }
+      }
+    }
+  },
+  "grants": [
+    { "env": "dev", "role": "analyst", "schema": "typlm", "tables": ["ty_project"], "ops": ["read"] },
+    { "env": "dev", "role": "ops", "schema": "typlm", "tables": ["ty_project", "ty_secret"], "ops": ["read", "write"] },
+    { "env": "ga", "role": "analyst", "schema": "typlm", "tables": "*", "ops": ["read"] },
+    { "env": "ga", "role": "admin", "schema": "typlm", "tables": "*", "ops": ["read", "write", "ddl"] }
+  ],
+  "users": [
+    {
+      "id": "u_analyst",
+      "name": "只读用户",
+      "tokens": ["test-token-analyst-0001"],
+      "roles": { "dev": ["analyst"], "ga": ["analyst"] }
+    },
+    {
+      "id": "u_ops",
+      "name": "运营用户",
+      "tokens": ["test-token-ops-000000001"],
+      "roles": { "dev": ["ops"] }
+    },
+    {
+      "id": "u_admin",
+      "name": "管理员",
+      "tokens": ["test-token-admin-0000001"],
+      "roles": { "dev": ["ops", "analyst"], "ga": ["admin"] }
+    }
+  ],
+  "audit": { "path": "./data/test-audit.jsonl" }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "@icen.ai/dbm",
+  "version": "0.1.0",
+  "description": "数据库中间层:直连 Provider(角色×连接池) + 权限清单物化为原生 GRANT + 预演/确认/执行/核验/留痕编排。对内是 npm 库,对外以 mcp-db(MCP server, stdio)暴露。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "mcp-db": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "dbm.example.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "e2e": "bun scripts/e2e-pg.ts",
+    "serve": "bun src/cli.ts serve"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.7.0"
+  }
+}
