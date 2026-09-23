@@ -1,6 +1,6 @@
-# @icen.ai/dbm · mcp-db
+# mcp-db
 
-数据库中间层:**直连 Provider(角色×连接池)+ 权限清单物化为数据库原生 GRANT + 预演/确认/护栏/执行/核验/留痕编排**。对内是 npm 库(`@icen.ai/dbm`),对外以 MCP server(`mcp-db`,stdio)暴露给 Agent 挂载——一层两吃,Agent 拿到的是**流程**,不是裸连接。
+数据库中间层:**直连 Provider(角色×连接池)+ 权限清单物化为数据库原生 GRANT + 预演/确认/护栏/执行/核验/留痕编排**。npm 包名 `mcp-db`(内部曾用名 @icen.ai/dbm),以 MCP server(stdio)对外暴露给 Agent 挂载——一层两吃,Agent 拿到的是**流程**,不是裸连接。
 
 ```
 用户/Agent → token 认证 → 角色解析
@@ -108,7 +108,7 @@ DBM_TOKEN=<用户 token> bun src/cli.ts serve
 ## 库用法
 
 ```ts
-import { loadConfig, Dbm } from '@icen.ai/dbm';
+import { loadConfig, Dbm } from 'mcp-db';
 
 const { config, scripts } = loadConfig('dbm.config.json');
 const dbm = Dbm.fromConfig(config, { scripts });

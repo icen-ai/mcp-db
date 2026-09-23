@@ -1,7 +1,7 @@
 {
-  "name": "@icen.ai/dbm",
+  "name": "mcp-db",
   "version": "0.1.0",
-  "description": "数据库中间层:直连 Provider(角色×连接池) + 权限清单物化为原生 GRANT + 预演/确认/执行/核验/留痕编排。对内是 npm 库,对外以 mcp-db(MCP server, stdio)暴露。",
+  "description": "数据库中间层 MCP server:直连 Provider(角色×连接池)+ 权限清单物化为原生 GRANT + 预演/确认/护栏/执行/核验/留痕。对内亦可作 npm 库使用(内部曾用名 @icen.ai/dbm)。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,4 +1,4 @@
-// @icen.ai/dbm 公共 API
+// mcp-db 公共 API(对外包名;内部曾用名 @icen.ai/dbm)
 // 对内:库用法(编排器/Provider/同步器/权限引擎)
 // 对外:bin(mcp-db serve)以 MCP server 暴露同一套流程
 
