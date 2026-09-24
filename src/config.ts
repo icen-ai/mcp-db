@@ -21,6 +21,12 @@ export interface RoleCredential {
 interface ConnectionBase {
   /** 业务默认 schema,如 typlm */
   schema: string;
+  /**
+   * 环境分层标签:消费方自定义枚举(plm-office 用 DEV/GA,GA=生产)。
+   * 语义由消费方解释,mcp-db 只做格式校验;缺省时消费方自定默认(如 DEV)。
+   * 与 requireConfirmForWrite 正交:生产类连接通常 env=GA + requireConfirmForWrite=true。
+   */
+  env?: string;
   /** 生产类连接置 true:写/DDL 需要 confirmPhrase 口令 */
   requireConfirmForWrite?: boolean;
   /** 确认口令,默认「生产执行」 */
@@ -53,7 +59,11 @@ export interface ProxyToolCall {
   args: Record<string, string>;
 }
 
-export interface McpProxyConnectionConfig extends ConnectionBase {
+/**
+ * mcp-proxy 的 env 表示子进程环境变量(Record),与 ConnectionBase 的环境分层
+ * 标签 env(string)语义不同,故从基类剔除后自行声明。
+ */
+export interface McpProxyConnectionConfig extends Omit<ConnectionBase, 'env'> {
   type: 'mcp-proxy';
   /** 子进程命令,如 "bun" / "npx" / "dbx-mcp 路径" */
   command: string;
@@ -123,6 +133,9 @@ export interface DbmConfig {
 // 通过配置注入 SQL 的可能(生成的 GRANT 语句不做参数化,必须管住原料)
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** 环境分层标签:大写字母开头的token,如 DEV / GA / PROD(枚举语义由消费方定义) */
+const ENV_CLASS_RE = /^[A-Z][A-Z0-9_]*$/;
+
 function isIdent(s: unknown): s is string {
   return typeof s === 'string' && IDENT_RE.test(s);
 }
@@ -165,6 +178,9 @@ function validateConnection(env: string, conn: any, fail: (m: string) => never):
   if (!isIdent(env)) fail(`连接名 "${env}" 不是合法标识符`);
   if (!conn || typeof conn !== 'object') fail(`${env}: 连接必须是对象`);
   if (!isIdent(conn.schema)) fail(`${env}: schema 必须是合法标识符`);
+  if (conn.env !== undefined && (typeof conn.env !== 'string' || !ENV_CLASS_RE.test(conn.env))) {
+    fail(`${env}: env 只能是大写分层标签(如 DEV / GA)`);
+  }
   if (!conn.roles || typeof conn.roles !== 'object' || Object.keys(conn.roles).length === 0) {
     fail(`${env}: roles 不能为空`);
   }
